@@ -1,10 +1,13 @@
 ---
+title: "Autism scrrening in adults"
+author: "Luigi Ciceri"
+output:
+  html_document: default
+  github_document: default
 editor_options:
   markdown:
     wrap: 80
 ---
-
-# Autism screening in adults
 
 The goal of this project is to create a model which would predict Autism
 Spectrum Disorder (ASD) in adults. This could be useful as an indication that
