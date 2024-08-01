@@ -38,7 +38,7 @@ useful in detecting ASD. They are:
 The packages `ranger` and `xgboost` must be installed The following packages
 must also be installed.
 
-```{r message=FALSE}
+```{r ,message=FALSE,warning=FALSE}
 library(farff) 
 library(ggplot2) 
 library(naniar) 
@@ -54,9 +54,21 @@ library(countrycode)
 library(rpart.plot)
 library(knitr)
 library(mice)
+library(utils)
 ```
 
 ## Data preprocessing
+
+Download the data from UCI and extract the .arff file
+
+```{r,message=FALSE}
+dir.create("data")
+download.file("https://archive.ics.uci.edu/static/public/426/autism+screening+adult.zip",
+              "data/ASD.zip")
+unzip("data/ASD.zip",exdir="data")
+file.remove(list.files(path='./data',pattern='*.zip|*.docx',full.names = T))
+
+```
 
 ### Data cleaning
 
@@ -64,7 +76,7 @@ Import the data into a data frame and convert to appropriate data types
 
 ```{r}
 set.seed(8421)
-data <- readARFF("/home/luigi/Documenti/Statistical Learning/Project/Data/Autism-Adult-Data.arff")
+data <- readARFF("data/Autism-Adult-Data.arff")
 data <- type.convert(data,as.is=F)
 ```
 
