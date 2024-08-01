@@ -1,0 +1,540 @@
+---
+editor_options:
+  markdown:
+    wrap: 80
+---
+
+# Autism screening in adults
+
+The goal of this project is to create a model which would predict Autism
+Spectrum Disorder (ASD) in adults. This could be useful as an indication that
+further investigation with a professional might be needed.
+
+## The data
+
+The data was found on UCI and is provided by Fadi Fayez Thabtah, Manukau
+Institute of Technology, Auckland. It contains 21 features which proved to be
+useful in detecting ASD. They are:
+
+-   A1 to A10 score: a score given by the [Autism Spectrum Quotient (AQ)
+    test](https://docs.autismresearchcentre.com/tests/AQ10.pdf)
+-   Age
+-   Gender
+-   Ethnicity
+-   Jaundice: whether or not the participant was born with jaundice (yellowish
+    or greenish pigmentation of the skin and sclera)
+-   Autism: whether or not the participant has a relative with autism
+-   Country of residence
+-   Used app before: whether or not the participant already used the app
+-   Result: sum of A1 to A10 score
+-   Age description
+-   Relation: who filled the form
+-   Class/ASD: whether or not the participant was classified with autism
+
+`Class\ASD` is the feature to be predicted
+
+## Project setup
+
+The packages `ranger` and `xgboost` must be installed The following packages
+must also be installed.
+
+```{r message=FALSE}
+library(farff) 
+library(ggplot2) 
+library(naniar) 
+library(UpSetR) 
+library(dplyr) 
+library(stringr) 
+library(tidyverse) 
+library(tidymodels) 
+library(vip)
+library(corrplot) 
+library(ROSE) 
+library(countrycode) 
+library(rpart.plot)
+library(knitr)
+library(mice)
+```
+
+## Data preprocessing
+
+### Data cleaning
+
+Import the data into a data frame and convert to appropriate data types
+
+```{r}
+set.seed(8421)
+data <- readARFF("/home/luigi/Documenti/Statistical Learning/Project/Data/Autism-Adult-Data.arff")
+data <- type.convert(data,as.is=F)
+```
+
+Plot a summary of the data
+
+```{r echo=TRUE}
+summary(data)
+```
+
+The summary reveals the following:
+
+-   The scores A1 to A10 have value 0 or 1 without missing values
+-   The age feature has 2 missing value and a maximum value of 383 (probable
+    outlier)
+-   The ethnicity feature has 95 missing values
+-   The age desc samples have only one value
+-   The relation feature has 95 missing values
+-   There are some misspelling errors and some feature names are poorly assigned
+
+Rename the badly assigned and misspelled features
+
+```{r}
+data <- rename(data, 'country_of_res' = "contry_of_res")
+data <- rename(data, 'class' = "Class/ASD")
+data <- rename(data, 'parent_autism' = "austim")
+data <- rename(data, 'jaundice' = "jundice")
+```
+
+Remove the `age_desc` feature
+
+```{r}
+data <- subset(data, select = -c(age_desc, result))
+```
+
+All country names are correct
+
+```{r paged.print=TRUE}
+data %>% count(country_of_res)
+```
+
+All ethnicities are correct but there is a misspelling
+
+```{r paged.print=TRUE}
+data %>% count(ethnicity)
+```
+
+Change `others` values to `Others`
+
+```{r}
+data <- data %>% mutate(across("ethnicity", \(x) str_replace(x, "others", "Others")))
+```
+
+All relation string are correct but `Health care professional` is too long
+
+```{r}
+data %>% count(relation)
+```
+
+Rename it
+
+```{r}
+data <- data %>%  mutate(across("relation", \(x) str_replace(x, "Health care professional", "Professional")))
+```
+
+### Missing values analysis
+
+Since the A1 to A10 features are difficult to analyze and don't contain any
+missing value, only the non question data is considered.
+
+```{r}
+gg_miss_var(data)
+no_q_data <- data[, 11:19]
+```
+
+To understand the nature of the missing data look at the relationship between
+missing values across features
+
+```{r}
+gg_miss_upset(no_q_data, nsets = n_var_miss(no_q_data))
+```
+
+In all samples where there is at least a missing value, both `ethnicity` and
+`relation` are missing. In 2 cases also `age` is missing.
+
+Look at the samples to see if there is a relationship between features and
+missing data
+
+```{r}
+relation_na <- no_q_data[is.na(no_q_data$ethnicity), ]
+relation_na
+relation_na %>% 
+  count(country_of_res) %>%
+  ggplot( aes(x = n, y = country_of_res)) +
+  geom_col(aes(fill = country_of_res)) +
+  theme(legend.position = "none")
+```
+
+Most of the missing data comes from middle eastern countries. This suggests some
+cultural reasons to hide some information, most likely due to how autism is
+[perceived in those regions](https://www.arabnews.com/node/1476196/middle-east).
+
+This might be a missing at random case where the missing values depend on the
+observed country of residence.
+
+Look at the missing data distribution with respect to countries.
+
+```{r}
+gg_miss_fct(x = no_q_data, fct = country_of_res)
+```
+
+Some countries' data would be lost if samples containing missing values were
+deleted. However no assumption can be made with respect to the possible values
+to be imputed. For example `etnhicity` might be inferred from the
+`country of residence` but the `relation` cannot be derived from the available
+data.
+
+Considering that there are only 97 missing values out of 704 samples the data is
+removed.
+
+```{r, results='hide'}
+imputation <- mice(type.convert(data, as.is =F ), method = 'cart')
+stripplot(imputation, age)
+stripplot(imputation, ethnicity)
+stripplot(imputation, relation)
+data <- complete(imputation)
+ #data <- data %>% drop_na()
+```
+
+The imputed values seems to make sense as age is below 100 and ethnicities are
+the one expected in middle eastern countries. Also given the age of participants
+the majority of imputation for *relation* is *self*.
+
+### Outliers analysis
+
+Only numerical predictors are considered
+
+As noted before a sample is way outside the range with a value of `383` .
+
+This might be an input error during the form filling procedure so it is replaced
+with `38` .
+
+```{r}
+data <- data %>% mutate(age=ifelse(age==383,38,age))
+```
+
+```{r}
+data %>% 
+  ggplot(aes(y = age)) + 
+  geom_boxplot(width = 0.05, fill = "salmon") + 
+  xlim(-0.1, 0.1) + 
+  theme_minimal() + 
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank())
+```
+
+The median is around 37 with some values above the upper IQR limit which however
+make sense.
+
+```{r}
+data %>% 
+  ggplot(aes(x = age)) + geom_histogram(fill = "thistle", color = "black") +
+  theme_minimal()
+```
+
+The distribution of age is shifted to the right, however applying a log
+transformation th move it towards a normal distribution did not make any
+difference on the final result.
+
+### Data balance analysis
+
+Look at the `class` feature balance
+
+```{r}
+data %>%
+  ggplot(aes(x = class)) + geom_bar(fill = "tan2", color = "black") + 
+  theme_minimal()
+```
+
+The labels are unbalanced with the `YES` ones being roughly half of the `NO`
+ones. Later on a balancing procedure will be carried out to see if better
+results can be achieved.
+
+### Data preprocessing
+
+As the ASD might depend on environmental factors, instead of keeping the
+countries names, a more coarse representation of the geographic area of
+residence is used by replacing the name of the country with its region as
+defined by the World Bank Development Indicators. This also allows to reduce the
+number of predictors when one-hot-encoding.
+
+Since all models are tree based, normalization is not carried out.
+
+```{r}
+country_to_region <- function(country) {
+    return(countrycode(country, origin = "country.name", destination = "region"))
+}
+
+data <- recipe(class ~ ., data) %>%
+    step_mutate_at(country_of_res, fn = country_to_region) %>%
+    step_string2factor(country_of_res) %>%
+    step_dummy(all_nominal_predictors()) %>%
+    prep() %>%
+    bake(new_data = NULL)
+```
+
+## Models training
+
+The random forest and gradient boosting ensemble models were used for this
+classification task.
+
+The random forest was trained using the *ranger* package while the gradient
+boosting with the *xgboost* package.
+
+Both models were trained with a k-fold cross validation procedure by creating 10
+splits with stratified sampling.
+
+The hyperparameter search was carried out with a random grid search to improve
+the performance. During this process the best model was selected according to
+the *f1 score* metric defined as:
+
+$$
+f1 = \frac{precision*recall}{pecision+recall}
+$$
+
+As this is a medical diagnosis task a balance between accuracy and recall is
+needed. In fact false positives would be undesirable while false negatives would
+discourage further medical investigation. A balance of the two seems the best
+approach.
+
+Define functions to perform the grid search which return the set of best
+parameters.
+
+```{r}
+random_forest_grid_search <- function(data) {
+    data_folds <- vfold_cv(data)
+    spec <- rand_forest(trees = tune(),
+                        mtry = tune(),
+                        min_n = tune(),
+                        mode = "classification") %>% 
+      set_engine("ranger", importance = "impurity")
+    recipe <- recipe(class ~ ., data)
+    wf <- workflow() %>%
+        add_model(spec) %>%
+        add_recipe(recipe)
+    tune <- wf %>% 
+      tune_grid(data_folds,
+                grid = grid_random(trees(range = c(100, 500)),
+                                   mtry(range = c(5, 15)),
+                                   min_n(range = c(6, 8))),
+                metrics = metric_set(f_meas))
+    print(autoplot(tune, metric = "f_meas"))
+    print(tune %>% collect_metrics())
+    best <- tune %>% 
+      select_best(metric = "f_meas")
+    return(finalize_model(spec, best))
+}
+```
+
+```{r}
+extreme_gradient_grid_search <- function(data) {
+    data_folds <- vfold_cv(data)
+    spec <- boost_tree(trees = tune(),
+                       mtry = tune(),
+                       min_n = tune(),
+                       tree_depth = tune(),
+                       learn_rate = tune(),
+                       mode = "classification") %>%
+        set_engine("xgboost") %>%
+        set_mode("classification")
+    recipe <- recipe(class ~ ., data)
+    wf <- workflow() %>%
+        add_model(spec) %>%
+        add_recipe(recipe)
+    tune <- wf %>%
+        tune_grid(data_folds,
+                  grid = grid_random(trees(range = c(10, 50))
+                                     , mtry(range = c(5, 15)),
+                                     min_n(range = c(6, 8)),
+                                     tree_depth(range = c(4, 12)),
+                                     learn_rate(), size = 50),
+                  metrics = metric_set(f_meas))
+    print(autoplot(tune, metric = "f_meas"))
+    print(tune %>% collect_metrics())
+    best <- tune %>%
+        select_best(metric = "f_meas")
+    return(finalize_model(spec, best))
+}
+```
+
+Define functions to train the best model obtained from the grid search
+
+```{r}
+train_extreme_gradient <- function(data) {
+    best <- extreme_gradient_grid_search(data)
+    args <- best$args
+    spec <- boost_tree(trees = args$trees[[2]],
+                       mtry = args$mtry[[2]],
+                       min_n = args$min_n[[2]],
+                       tree_depth = args$tree_depth[[2]],
+                       learn_rate = args$learn_rate[[2]]) %>%
+        set_engine("xgboost") %>%
+        set_mode("classification")
+    recipe <- recipe(class ~ ., data)
+    wf <- workflow() %>%
+        add_model(spec) %>%
+        add_recipe(recipe)
+    return(fit(wf, data))
+}
+```
+
+```{r}
+train_random_forest <- function(data) {
+    best <- random_forest_grid_search(data)
+    recipe <- recipe(class ~ ., data)
+    args <- best$args
+    spec <- rand_forest(trees = args$trees[[2]],
+                        mtry = args$mtry[[2]],
+                        min_n = args$min_n[[2]],
+                        mode = "classification") %>%
+        set_engine("ranger", importance = "impurity")
+    wf <- workflow() %>%
+        add_model(spec) %>%
+        add_recipe(recipe)
+    return(fit(wf, data))
+}
+```
+
+### Imbalanced data
+
+Train the random forest
+
+```{r warning=FALSE}
+forest <- train_random_forest(data)
+forest
+```
+
+The best model has an f1 score of *0.972* on the cross validation splits. When
+trained on all data the Out Of Bag error is *0.041*.
+
+```{r}
+plot(forest %>% extract_fit_parsnip() %>% vip())
+```
+
+From the variable importance plot of the 10 most influential predictors, the
+answer to question 9 seems the most influential followed by question 6 and 5. Of
+the non question feature, the most influential is the age.
+
+Train the gradient boosting
+
+```{r}
+gb <- train_extreme_gradient(data)
+```
+
+The best model has an f1 score of *0.97* on the cross validation splits. This is
+slightly lower than the random forest model.
+
+### Balanced data
+
+To see if the performance can be improved further the data was balanced by
+oversampling
+
+```{r}
+data <- ovun.sample(class ~ ., data = data, method = "both", seed = 8421)
+data <- data$data
+data %>% ggplot(aes(x = class)) + geom_bar(fill = "orange")
+```
+
+The data is now balanced with respect to the labels.
+
+Train the random forest
+
+```{r}
+forest <- train_random_forest(data)
+forest
+```
+
+![](images/clipboard-9133593.png)
+
+Balancing the data slightly improves the performance bringing the f1 score on
+the cross validation splits to *0.986* while also reducing the Out Of Bag error
+to *0.021*.
+
+```{r}
+plot(forest %>% extract_fit_parsnip() %>% vip())
+```
+
+The variable importance is the same as the imbalanced case.
+
+Train the gradient boosting
+
+```{r}
+gb <- train_extreme_gradient(data)
+```
+
+Also in this case th performance is slightly improved with an f1 score of
+*0.978* which is better than the *0.97* of the imbalanced case.
+
+### Interpretability
+
+Before the conclusion it might be helpful to train a simple tree on the data to
+have an idea of how the model interprets the data.
+
+Create a train and evaluation split on the balanced data
+
+```{r}
+data_split <- initial_split(data, prop = 0.8, strata = "class")
+train_data <- training(data_split)
+test_data <- testing(data_split)
+```
+
+Define function to train and evaluate the tree
+
+```{r}
+train_tree <- function(data) {
+    spec <- decision_tree(mode = "classification", tree_depth = 5, min_n = 10)
+    recipe <- recipe(class ~ ., data)
+    wf <- workflow() %>%
+        add_model(spec) %>%
+        add_recipe(recipe)
+    return(fit(wf, data))
+}
+
+evaluate_model <- function(model, eval_data) {
+    eval_pred <- model %>%
+        predict(eval_data, type = "class") %>%
+        bind_cols(eval_data)
+    print(eval_pred %>% metrics(truth = class, estimate = .pred_class))
+    print(eval_pred %>%  f_meas(truth = class, estimate = .pred_class))
+    print(autoplot(eval_pred %>% conf_mat(truth = class, .pred_class), type = "heatmap"))
+
+    eval_pred <- model %>%
+        predict(eval_data, type = "prob") %>%
+        bind_cols(eval_data)
+    print(autoplot(eval_pred %>% roc_curve(truth = class, .pred_NO)))
+    print(eval_pred %>%  roc_auc(truth = class, .pred_NO))
+}
+```
+
+Train a the classification tree and evaluate
+
+```{r}
+tree <- train_tree(train_data)
+evaluate_model(tree, test_data)
+```
+
+The evaluation results in a good performance given the simplicity of the model,
+so a good interpretation of the data is expected.
+
+```{r}
+tree %>% extract_fit_engine() %>% rpart.plot(roundint = F)
+```
+
+From the tree diagram the A9 score is the most important one in classifying a
+person with ASD, which is consistent with the variable importance analysis.
+
+In contrast to that analysis however, age does not compare while being of black
+ethnicity apparently is a minor determining factor in diagnosing ASD.
+
+## Conclusions
+
+| Model             | Balanced | Imbalanced |
+|-------------------|:--------:|:----------:|
+| Random forest     |  0.986   |   0.972    |
+| Gradient boosting |  0.978   |    0.97    |
+
+The trained models both gave a good performance with an f1 score above *0.97*.
+The random forest is slightly superior to the gradient boost both in a balanced
+and imbalanced data case. Balancing the data allows for a slight increase in
+performance on both models.
+
+What emerges from a simple tree interpretation is that the answer to the
+question 5 is a fundamental factor in predicting ASD together with being of
+black ethnicity . This last result should be checked with professionals to see
+if it actually makes sense.
