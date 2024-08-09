@@ -191,13 +191,11 @@ gg_miss_fct(x = no_q_data, fct = country_of_res)
 ```
 
 Some countries' data would be lost if samples containing missing values were
-deleted. However no assumption can be made with respect to the possible values
-to be imputed. For example `etnhicity` might be inferred from the
-`country of residence` but the `relation` cannot be derived from the available
-data.
+deleted.
 
-Considering that there are only 97 missing values out of 704 samples the data is
-removed.
+Due to the fact that this is a probable MAR case imputation is applied with
+Multiple Imputation by Chained Equations (MICE) to try to recover the
+`ethnicity`, `age` and `relation` missing values.
 
 ```{r, results='hide'}
 imputation <- mice(type.convert(data, as.is =F ), method = 'cart')
