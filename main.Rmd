@@ -1,23 +1,27 @@
 ---
-title: "Autism scrrening in adults"
+title: "Autism screening in adults"
 author: "Luigi Ciceri"
-output:
-  html_document: default
-  github_document: default
+output: github_document
 editor_options:
   markdown:
     wrap: 80
 ---
 
-The goal of this project is to create a model which would predict Autism
-Spectrum Disorder (ASD) in adults. This could be useful as an indication that
-further investigation with a professional might be needed.
+The goal of this project is to create a model which can predict Autism Spectrum
+Disorder (ASD) in adults.
+
+ASD is a medical condition associated with problems in social relationships and
+repetitive behaviour patterns. The diagnosis process is long and complicated and
+sometimes this condition stays unnoticed for a very long time.
+
+This prediction project could be useful as an indication that further
+investigation with a professional might be needed.
 
 ## The data
 
-The data was found on UCI and is provided by Fadi Fayez Thabtah, Manukau
-Institute of Technology, Auckland. It contains 21 features which proved to be
-useful in detecting ASD. They are:
+The data was found on UCI and is provided by *Fadi Fayez Thabtah, Manukau
+Institute of Technology, Auckland* and has been collected through an app. It
+contains 21 features which proved to be useful in detecting ASD. They are:
 
 -   A1 to A10 score: a score given by the [Autism Spectrum Quotient (AQ)
     test](https://docs.autismresearchcentre.com/tests/AQ10.pdf)
@@ -34,7 +38,7 @@ useful in detecting ASD. They are:
 -   Relation: who filled the form
 -   Class/ASD: whether or not the participant was classified with autism
 
-`Class\ASD` is the feature to be predicted
+*Class\\ASD* is the feature to be predicted
 
 ## Project setup
 
@@ -62,7 +66,7 @@ library(utils)
 
 ## Data preprocessing
 
-Download the data from UCI and extract the .arff file
+Download the data from UCI and extract the *.arff* file
 
 ```{r,message=FALSE}
 dir.create("data")
@@ -91,15 +95,15 @@ summary(data)
 
 The summary reveals the following:
 
--   The scores A1 to A10 have value 0 or 1 without missing values
--   The age feature has 2 missing value and a maximum value of 383 (probable
-    outlier)
--   The ethnicity feature has 95 missing values
--   The age desc samples have only one value
--   The relation feature has 95 missing values
+-   The scores A1 to A10 take value 0 or 1 without missing values
+-   The *age* feature has *2* missing value and a maximum value of *383*
+    (probable outlier)
+-   The *ethnicity* feature has *95* missing values
+-   The *age_desc* observations take only one value
+-   The *relation* feature has *95* missing values
 -   There are some misspelling errors and some feature names are poorly assigned
 
-Rename the badly assigned and misspelled features
+Rename the badly assigned and misspelt features
 
 ```{r}
 data <- rename(data, 'country_of_res' = "contry_of_res")
@@ -108,7 +112,8 @@ data <- rename(data, 'parent_autism' = "austim")
 data <- rename(data, 'jaundice' = "jundice")
 ```
 
-Remove the `age_desc` feature
+Remove the *age_desc* feature as it doesn't bring any information. *result* is
+also removed as it is just the sum of questions scores.
 
 ```{r}
 data <- subset(data, select = -c(age_desc, result))
@@ -126,13 +131,13 @@ All ethnicities are correct but there is a misspelling
 data %>% count(ethnicity)
 ```
 
-Change `others` values to `Others`
+Change *others* to *Others*
 
 ```{r}
 data <- data %>% mutate(across("ethnicity", \(x) str_replace(x, "others", "Others")))
 ```
 
-All relation string are correct but `Health care professional` is too long
+All relation string are correct but *Health care professional* is too long
 
 ```{r}
 data %>% count(relation)
@@ -144,9 +149,44 @@ Rename it
 data <- data %>%  mutate(across("relation", \(x) str_replace(x, "Health care professional", "Professional")))
 ```
 
+### Outliers analysis
+
+Only numerical predictors are considered in this analysis.
+
+As noted before a sample is way outside the range with a value of *383* .
+
+This might be an input error during the form filling procedure so it is replaced
+with *38* which makes more sense.
+
+```{r}
+data <- data %>% mutate(age=ifelse(age==383,38,age))
+```
+
+```{r}
+data %>% 
+  ggplot(aes(y = age)) + 
+  geom_boxplot(width = 0.05, fill = "salmon") + 
+  xlim(-0.1, 0.1) + 
+  theme_minimal() + 
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank())
+```
+
+The median is around *37* with some values above the upper IQR limit which
+however are within age limits.
+
+```{r}
+data %>% 
+  ggplot(aes(x = age)) + geom_histogram(fill = "thistle", color = "black") +
+  theme_minimal()
+```
+
+The distribution of age is shifted to the right, however applying a log
+transformation to move it towards a normal distribution did not make any
+difference on the final result.
+
 ### Missing values analysis
 
-Since the A1 to A10 features are difficult to analyze and don't contain any
+Since the *A1* to *A10* features are difficult to analyze and don't contain any
 missing value, only the non question data is considered.
 
 ```{r}
@@ -161,8 +201,8 @@ missing values across features
 gg_miss_upset(no_q_data, nsets = n_var_miss(no_q_data))
 ```
 
-In all samples where there is at least a missing value, both `ethnicity` and
-`relation` are missing. In 2 cases also `age` is missing.
+In all samples where there is at least a missing value, both *ethnicity* and
+*relation* are missing. In *2* cases *age* is also missing.
 
 Look at the samples to see if there is a relationship between features and
 missing data
@@ -193,11 +233,11 @@ gg_miss_fct(x = no_q_data, fct = country_of_res)
 Some countries' data would be lost if samples containing missing values were
 deleted.
 
-Due to the fact that this is a probable MAR case imputation is applied with
-Multiple Imputation by Chained Equations (MICE) to try to recover the
-`ethnicity`, `age` and `relation` missing values.
+Due to the fact that this is a probable MAR case, imputation is applied with
+*Multiple Imputation by Chained Equations (MICE)* to try to recover the
+*ethnicity*, *age* and *relation* missing values.
 
-```{r, results='hide'}
+```{r}
 imputation <- mice(type.convert(data, as.is =F ), method = 'cart')
 stripplot(imputation, age)
 stripplot(imputation, ethnicity)
@@ -206,48 +246,13 @@ data <- complete(imputation)
  #data <- data %>% drop_na()
 ```
 
-The imputed values seems to make sense as age is below 100 and ethnicities are
+The imputed values seems to make sense as age is below *100* and ethnicities are
 the one expected in middle eastern countries. Also given the age of participants
 the majority of imputation for *relation* is *self*.
 
-### Outliers analysis
-
-Only numerical predictors are considered
-
-As noted before a sample is way outside the range with a value of `383` .
-
-This might be an input error during the form filling procedure so it is replaced
-with `38` .
-
-```{r}
-data <- data %>% mutate(age=ifelse(age==383,38,age))
-```
-
-```{r}
-data %>% 
-  ggplot(aes(y = age)) + 
-  geom_boxplot(width = 0.05, fill = "salmon") + 
-  xlim(-0.1, 0.1) + 
-  theme_minimal() + 
-  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank())
-```
-
-The median is around 37 with some values above the upper IQR limit which however
-make sense.
-
-```{r}
-data %>% 
-  ggplot(aes(x = age)) + geom_histogram(fill = "thistle", color = "black") +
-  theme_minimal()
-```
-
-The distribution of age is shifted to the right, however applying a log
-transformation th move it towards a normal distribution did not make any
-difference on the final result.
-
 ### Data balance analysis
 
-Look at the `class` feature balance
+Look at the *class* feature balance
 
 ```{r}
 data %>%
@@ -255,7 +260,7 @@ data %>%
   theme_minimal()
 ```
 
-The labels are unbalanced with the `YES` ones being roughly half of the `NO`
+The labels are unbalanced with the *YES* ones being roughly half of the *NO*
 ones. Later on a balancing procedure will be carried out to see if better
 results can be achieved.
 
@@ -264,8 +269,8 @@ results can be achieved.
 As the ASD might depend on environmental factors, instead of keeping the
 countries names, a more coarse representation of the geographic area of
 residence is used by replacing the name of the country with its region as
-defined by the World Bank Development Indicators. This also allows to reduce the
-number of predictors when one-hot-encoding.
+defined by the *World Bank Development Indicators*. This also allows to reduce
+the number of predictors when one-hot-encoding.
 
 Since all models are tree based, normalization is not carried out.
 
@@ -290,8 +295,8 @@ classification task.
 The random forest was trained using the *ranger* package while the gradient
 boosting with the *xgboost* package.
 
-Both models were trained with a k-fold cross validation procedure by creating 10
-splits with stratified sampling.
+Both models were trained with a k-fold cross validation procedure by creating
+*10* splits with stratified sampling.
 
 The hyperparameter search was carried out with a random grid search to improve
 the performance. During this process the best model was selected according to
@@ -302,7 +307,7 @@ f1 = \frac{precision*recall}{pecision+recall}
 $$
 
 As this is a medical diagnosis task a balance between accuracy and recall is
-needed. In fact false positives would be undesirable while false negatives would
+needed. In fact false positive would be undesirable while a false negative would
 discourage further medical investigation. A balance of the two seems the best
 approach.
 
@@ -409,11 +414,12 @@ train_random_forest <- function(data) {
 Train the random forest
 
 ```{r warning=FALSE}
+set.seed(8421)
 forest <- train_random_forest(data)
 forest
 ```
 
-The best model has an f1 score of *0.972* on the cross validation splits. When
+The best model has an f1 score of *0.97* on the cross validation splits. When
 trained on all data the Out Of Bag error is *0.041*.
 
 ```{r}
@@ -421,17 +427,18 @@ plot(forest %>% extract_fit_parsnip() %>% vip())
 ```
 
 From the variable importance plot of the 10 most influential predictors, the
-answer to question 9 seems the most influential followed by question 6 and 5. Of
-the non question feature, the most influential is the age.
+answer to question *9* seems the most influential followed by question *6* and
+*5*. Of the non question feature, the most influential is the *age*.
 
 Train the gradient boosting
 
 ```{r}
+set.seed(8421)
 gb <- train_extreme_gradient(data)
 ```
 
-The best model has an f1 score of *0.97* on the cross validation splits. This is
-slightly lower than the random forest model.
+The best model has an f1 score of *0.965* on the cross validation splits. This
+is slightly lower than the random forest model.
 
 ### Balanced data
 
@@ -449,6 +456,7 @@ The data is now balanced with respect to the labels.
 Train the random forest
 
 ```{r}
+set.seed(8421)
 forest <- train_random_forest(data)
 forest
 ```
@@ -456,28 +464,31 @@ forest
 ![](images/clipboard-9133593.png)
 
 Balancing the data slightly improves the performance bringing the f1 score on
-the cross validation splits to *0.986* while also reducing the Out Of Bag error
+the cross validation splits to *0.983* while also reducing the Out Of Bag error
 to *0.021*.
 
 ```{r}
 plot(forest %>% extract_fit_parsnip() %>% vip())
 ```
 
-The variable importance is the same as the imbalanced case.
+The variable importance is similar same as the imbalanced case.
 
 Train the gradient boosting
 
 ```{r}
+set.seed(8421)
 gb <- train_extreme_gradient(data)
 ```
 
-Also in this case th performance is slightly improved with an f1 score of
-*0.978* which is better than the *0.97* of the imbalanced case.
+Also in this case th performance is almost the same as the imbalanced case with
+an f1 score of *0.961*.
 
-### Interpretability
+### Interpretation
 
 Before the conclusion it might be helpful to train a simple tree on the data to
-have an idea of how the model interprets the data.
+have an idea of how the model interprets the data. This is just for
+summarization purposes as training a single tree which is highly influenced by
+the dataset split is not a good practice.
 
 Create a train and evaluation split on the balanced data
 
@@ -515,39 +526,41 @@ evaluate_model <- function(model, eval_data) {
 }
 ```
 
-Train a the classification tree and evaluate
+Train a classification tree and evaluate
 
 ```{r}
+set.seed(8421)
 tree <- train_tree(train_data)
 evaluate_model(tree, test_data)
 ```
 
-The evaluation results in a good performance given the simplicity of the model,
-so a good interpretation of the data is expected.
+The evaluation results in a good performance given the simplicity of the model.
 
 ```{r}
 tree %>% extract_fit_engine() %>% rpart.plot(roundint = F)
 ```
 
-From the tree diagram the A9 score is the most important one in classifying a
+From the tree diagram the *A9* score is the most important one in classifying a
 person with ASD, which is consistent with the variable importance analysis.
 
-In contrast to that analysis however, age does not compare while being of black
-ethnicity apparently is a minor determining factor in diagnosing ASD.
+In contrast to that analysis however, *age* does not compare in variables chosen
+for the splits.
 
 ## Conclusions
 
 | Model             | Balanced | Imbalanced |
 |-------------------|:--------:|:----------:|
-| Random forest     |  0.986   |   0.972    |
-| Gradient boosting |  0.978   |    0.97    |
+| Random forest     |  0.983   |    0.97    |
+| Gradient boosting |  0.965   |   0.961    |
 
-The trained models both gave a good performance with an f1 score above *0.97*.
-The random forest is slightly superior to the gradient boost both in a balanced
-and imbalanced data case. Balancing the data allows for a slight increase in
-performance on both models.
+The trained models both gave a good performance with an f1 score close to
+*0.97*. The random forest is slightly superior to the gradient boosting both in
+the balanced and imbalanced data case. Balancing the data allows for a slight
+increase in performance on the random forest while it stays almost the same in
+the gradient boosting.
 
 What emerges from a simple tree interpretation is that the answer to the
-question 5 is a fundamental factor in predicting ASD together with being of
-black ethnicity . This last result should be checked with professionals to see
-if it actually makes sense.
+question *9* is a fundamental factor in predicting ASD.
+
+This last result should be checked with professionals to see if it actually
+makes sense.
